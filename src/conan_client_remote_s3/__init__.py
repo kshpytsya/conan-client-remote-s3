@@ -38,10 +38,10 @@ def s3_bucket(bucket_name):
     return boto3.resource(
         "s3",
         endpoint_url=f"https://s3.{region}.amazonaws.com",
-        config=boto3.session.Config(s3={
-            "addressing_style": "virtual",
-            "signature_version": "s3v4",
-        }),
+        config=boto3.session.Config(
+            s3=dict(addressing_style="virtual"),
+            signature_version="s3v4",
+        ),
     ).Bucket(bucket_name)
 
 
