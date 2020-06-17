@@ -30,7 +30,7 @@ def json_response(data):
     return Response(json.dumps(data), mimetype="application/json")
 
 
-@functools.lru_cache
+@functools.lru_cache()
 def s3_resource():
     return boto3.resource("s3")
 
