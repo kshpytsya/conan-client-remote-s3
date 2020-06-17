@@ -32,7 +32,10 @@ def json_response(data):
 
 @functools.lru_cache()
 def s3_resource():
-    return boto3.resource("s3")
+    return boto3.resource(
+        "s3",
+        config=boto3.session.Config(s3={"addressing_style": "path"}),
+    )
 
 
 def bucket_from_request(request):
