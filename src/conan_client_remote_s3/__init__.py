@@ -31,15 +31,22 @@ def json_response(data):
 
 
 @functools.lru_cache()
-def s3_resource():
+def s3_bucket(bucket_name):
+    client = boto3.client("s3")
+    region = client.get_bucket_location(Bucket=bucket_name).get("LocationConstraint", "us-east-1")
+
     return boto3.resource(
         "s3",
-        config=boto3.session.Config(s3={"addressing_style": "path"}),
-    )
+        endpoint_url=f"https://s3.{region}.amazonaws.com",
+        config=boto3.session.Config(s3={
+            "addressing_style": "virtual",
+            "signature_version": "s3v4",
+        }),
+    ).Bucket(bucket_name)
 
 
 def bucket_from_request(request):
-    return request.environ["SERVER_NAME"]
+    return s3_bucket(request.environ["SERVER_NAME"])
 
 
 def ep_ping(request):
@@ -62,8 +69,7 @@ def ep_digest(request, path):
     logger.debug("conan_client_remote_s3 digest: %s", path)
     fail_on_remaining(request.args)
 
-    bucket_name = bucket_from_request(request)
-    bucket = s3_resource().Bucket(bucket_name)
+    bucket = bucket_from_request(request)
 
     digest = {}
 
@@ -72,15 +78,15 @@ def ep_digest(request, path):
 
         try:
             bucket.Object(key).e_tag
-        except s3_resource().meta.client.exceptions.ClientError as e:
+        except bucket.meta.client.exceptions.ClientError as e:
             if e.response["Error"]["Code"] == "404":
                 return Response(status=404)
             else:
                 raise
 
-        digest[k] = s3_resource().meta.client.generate_presigned_url(
+        digest[k] = bucket.meta.client.generate_presigned_url(
             "get_object",
-            Params=dict(Bucket=bucket_name, Key=key),
+            Params=dict(Bucket=bucket.name, Key=key),
             ExpiresIn=S3_PRESIGNED_EXPIRY,
         )
 
@@ -91,15 +97,15 @@ def ep_download_urls(request, path):
     logger.debug("conan_client_remote_s3 download_urls %s", path)
     fail_on_remaining(request.args)
 
-    bucket_name = bucket_from_request(request)
+    bucket = bucket_from_request(request)
 
     return json_response({
-        k.key[len(path) + 1:]: s3_resource().meta.client.generate_presigned_url(
+        k.key[len(path) + 1:]: bucket.meta.client.generate_presigned_url(
             "get_object",
-            Params=dict(Bucket=bucket_name, Key=k.key),
+            Params=dict(Bucket=bucket.name, Key=k.key),
             ExpiresIn=S3_PRESIGNED_EXPIRY,
         )
-        for k in s3_resource().Bucket(bucket_name).objects.filter(Prefix=f"{path}/", Delimiter="/")
+        for k in bucket.objects.filter(Prefix=f"{path}/", Delimiter="/")
     })
 
 
@@ -107,8 +113,7 @@ def ep_snapshot(request, path):
     logger.debug("conan_client_remote_s3 snapshot %s", path)
     fail_on_remaining(request.args)
 
-    bucket_name = bucket_from_request(request)
-    bucket = s3_resource().Bucket(bucket_name)
+    bucket = bucket_from_request(request)
 
     # note: S3 e-tag is MD5 except of multi-part uploads which we do not do
     return json_response({
@@ -121,11 +126,13 @@ def ep_upload_urls(request, path):
     logger.debug("conan_client_remote_s3 upload_urls %s %s", path, request.json)
     fail_on_remaining(request.args)
 
+    bucket = bucket_from_request(request)
+
     return json_response({
-        k: s3_resource().meta.client.generate_presigned_url(
+        k: bucket.meta.client.generate_presigned_url(
             "put_object",
             Params=dict(
-                Bucket=bucket_from_request(request),
+                Bucket=bucket.name,
                 Key=f"{path}/{k}",
             ),
             ExpiresIn=S3_PRESIGNED_EXPIRY,
